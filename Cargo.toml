@@ -1,0 +1,9 @@
+[package]
+name = "mysh"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+is_executable = "1.0.5"
+libc = "0.2.180"
+
