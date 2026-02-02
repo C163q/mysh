@@ -86,3 +86,13 @@ fn get_executable_in_path(cmd: &str, env: &ExecEnv) -> Option<DirEntry> {
 `echo 'va'lu"e"   >>> 1.txt`该怎么处理？等等……
 
 我暂时不想在此处讲太多，因为这只是多种特殊情况的堆砌而已。
+
+## 集成测试
+
+我发现rust的测试好像是会截获`println!`的输出的，我在`cargo test`中如法炮制，交换fd，想要捕获指令输出到
+标准输出的结果，结果发现不行……
+
+在查了`println!`的实现后发现，它会调用`stdio::print_to`函数，这个函数内部会使用`print_to_buffer_if_capture_used`
+函数，它会将内容捕获，而不输出。
+
+要么解决方法之一是使用`cargo run -- --nocapture`。但是……我觉得还是应该重写一下输出部分，防止捕获。

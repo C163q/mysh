@@ -1,7 +1,5 @@
 use std::{
-    collections::HashMap,
-    fs::{DirEntry, ReadDir, read_dir},
-    path::{Path, PathBuf},
+    collections::HashMap, fs::{DirEntry, ReadDir, read_dir}, io::{self, Write}, path::{Path, PathBuf}
 };
 
 use is_executable::IsExecutable;
@@ -25,8 +23,11 @@ thread_local! {
 }
 
 /// echo command implementation
+///
+/// We use writeln! to avoid capturing stdout in tests.
+#[allow(clippy::explicit_write)]
 pub fn echo_command(args: Vec<String>, _: &mut ExecEnv) {
-    println!("{}", args.join(" "));
+    writeln!(io::stdout(), "{}", args.join(" ")).unwrap();
 }
 
 /// exit command should be handled earlier, so it does nothing here
@@ -51,6 +52,7 @@ fn get_executable_in_path(cmd: &str, env: &ExecEnv) -> Option<DirEntry> {
 }
 
 /// type command implementation
+#[allow(clippy::explicit_write)]
 pub fn type_command(args: Vec<String>, env: &mut ExecEnv) {
     // For now, we just handle one argument
     let first_arg = match args.first() {
@@ -65,29 +67,31 @@ pub fn type_command(args: Vec<String>, env: &mut ExecEnv) {
 
     // builtin command
     if builtin {
-        println!("{} is a shell builtin", first_arg);
+        writeln!(io::stdout(), "{} is a shell builtin", first_arg).unwrap();
         return;
     }
 
     // external command
     if let Some(entry) = get_executable_in_path(first_arg, env) {
-        println!("{} is {}", first_arg, entry.path().display());
+        writeln!(io::stdout(), "{} is {}", first_arg, entry.path().display()).unwrap();
         return;
     }
 
-    eprintln!("{}: not found", first_arg);
+    writeln!(io::stderr(), "{}: not found", first_arg).unwrap();
 }
 
+#[allow(clippy::explicit_write)]
 pub fn pwd_command(_: Vec<String>, _: &mut ExecEnv) {
     if let Ok(path) = std::env::current_dir() {
-        println!("{}", path.display());
+        writeln!(io::stdout(), "{}", path.display()).unwrap();
     }
 }
 
+#[allow(clippy::explicit_write)]
 pub fn cd_command(args: Vec<String>, _: &mut ExecEnv) {
     fn navigate(path: &Path) {
         if std::env::set_current_dir(path).is_err() {
-            eprintln!("cd: {}: No such file or directory", path.display());
+            writeln!(io::stderr(), "cd: {}: No such file or directory", path.display()).unwrap();
         }
     }
 

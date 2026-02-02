@@ -181,6 +181,7 @@ fn parse(input: &str) -> Option<ParseData> {
                         redirect_info = None;
                         continue;
                     }
+                    continue;   // info.filename_pending should not be set to false here
                 }
                 _ => {
                     if info.append_pending {
