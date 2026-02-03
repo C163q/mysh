@@ -1,5 +1,8 @@
 use std::{
-    collections::HashMap, fs::{DirEntry, ReadDir, read_dir}, io::{self, Write}, path::{Path, PathBuf}
+    collections::HashMap,
+    fs::{DirEntry, ReadDir, read_dir},
+    io::{self, Write},
+    path::{Path, PathBuf},
 };
 
 use is_executable::IsExecutable;
@@ -91,7 +94,12 @@ pub fn pwd_command(_: Vec<String>, _: &mut ExecEnv) {
 pub fn cd_command(args: Vec<String>, _: &mut ExecEnv) {
     fn navigate(path: &Path) {
         if std::env::set_current_dir(path).is_err() {
-            writeln!(io::stderr(), "cd: {}: No such file or directory", path.display()).unwrap();
+            writeln!(
+                io::stderr(),
+                "cd: {}: No such file or directory",
+                path.display()
+            )
+            .unwrap();
         }
     }
 

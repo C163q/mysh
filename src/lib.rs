@@ -1,11 +1,13 @@
 pub mod builtin;
 pub mod env;
 pub mod parse;
-pub mod result;
 pub mod redirect;
+pub mod result;
+pub mod completion;
 
 use crate::{
-    env::{ExecEnv, PathEnv}, result::ExecResult
+    env::{ExecEnv, PathEnv},
+    result::ExecResult,
 };
 
 pub fn get_path_env() -> PathEnv {

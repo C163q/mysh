@@ -90,11 +90,11 @@ impl Redirect {
     }
 }
 
-pub(crate) struct RedirectParseInfo {
+#[derive(Debug, Clone)]
+pub struct RedirectParseInfo {
     pub is_input: bool,
     pub append_pending: bool,
     pub append: bool,
-    pub filename_pending: bool,
     pub fd: Option<i32>,
 }
 
@@ -104,7 +104,6 @@ impl RedirectParseInfo {
             is_input: false,
             append_pending: true,
             append: false,
-            filename_pending: true,
             fd: None,
         }
     }
@@ -114,8 +113,26 @@ impl RedirectParseInfo {
             is_input: true,
             append_pending: false,
             append: false,
-            filename_pending: true,
             fd: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RedirectParseFragment {
+    pub is_input: bool,
+    pub append: bool,
+    pub fd: i32,
+    pub value: String,
+}
+
+impl RedirectParseFragment {
+    pub fn build(info: &RedirectParseInfo, value: String) -> Self {
+        Self {
+            is_input: info.is_input,
+            append: info.append,
+            fd: info.fd.unwrap_or(if info.is_input { 0 } else { 1 }),
+            value,
         }
     }
 }
