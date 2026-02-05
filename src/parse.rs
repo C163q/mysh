@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process};
+use std::{cell::RefCell, path::PathBuf, process, rc::Rc};
 
 use crate::{
     env::ExecEnv,
@@ -12,7 +12,7 @@ use crate::{
 pub fn execute_command(
     cmd: String,
     args: Vec<String>,
-    env: &mut ExecEnv,
+    env: Rc<RefCell<ExecEnv>>,
     redirect: Redirect,
 ) -> ExecResult {
     if cmd == "exit" {
@@ -24,7 +24,7 @@ pub fn execute_command(
     if let Some(func) = f {
         // RedirectHandler scope
         let _handler = RedirectHandler::new(&redirect);
-        func(args, env);
+        func(args, env.borrow_mut());
         return ExecResult::Normal;
     }
 
@@ -188,7 +188,6 @@ pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
             backslash = false;
             continue;
         }
-
 
         // Things after `>` or `<`
         // for example:

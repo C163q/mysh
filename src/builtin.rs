@@ -1,7 +1,9 @@
 use std::{
+    cell::RefMut,
     collections::HashMap,
     fs::{DirEntry, ReadDir, read_dir},
     io::{self, Write},
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -9,7 +11,7 @@ use is_executable::IsExecutable;
 
 use crate::env::ExecEnv;
 
-type BuiltinExecFunc = fn(Vec<String>, &mut ExecEnv);
+type BuiltinExecFunc = fn(Vec<String>, RefMut<ExecEnv>);
 
 // single thread, so we use thread_local
 thread_local! {
@@ -29,12 +31,12 @@ thread_local! {
 ///
 /// We use writeln! to avoid capturing stdout in tests.
 #[allow(clippy::explicit_write)]
-pub fn echo_command(args: Vec<String>, _: &mut ExecEnv) {
+pub fn echo_command(args: Vec<String>, _: RefMut<ExecEnv>) {
     writeln!(io::stdout(), "{}", args.join(" ")).unwrap();
 }
 
 /// exit command should be handled earlier, so it does nothing here
-pub fn exit_command(_: Vec<String>, _: &mut ExecEnv) {}
+pub fn exit_command(_: Vec<String>, _: RefMut<ExecEnv>) {}
 
 fn get_executable_in_path(cmd: &str, env: &ExecEnv) -> Option<DirEntry> {
     fn dir_get_executable(name: &str, reader: ReadDir) -> Option<DirEntry> {
@@ -56,7 +58,7 @@ fn get_executable_in_path(cmd: &str, env: &ExecEnv) -> Option<DirEntry> {
 
 /// type command implementation
 #[allow(clippy::explicit_write)]
-pub fn type_command(args: Vec<String>, env: &mut ExecEnv) {
+pub fn type_command(args: Vec<String>, env: RefMut<ExecEnv>) {
     // For now, we just handle one argument
     let first_arg = match args.first() {
         Some(arg) => arg,
@@ -75,7 +77,7 @@ pub fn type_command(args: Vec<String>, env: &mut ExecEnv) {
     }
 
     // external command
-    if let Some(entry) = get_executable_in_path(first_arg, env) {
+    if let Some(entry) = get_executable_in_path(first_arg, env.deref()) {
         writeln!(io::stdout(), "{} is {}", first_arg, entry.path().display()).unwrap();
         return;
     }
@@ -84,14 +86,14 @@ pub fn type_command(args: Vec<String>, env: &mut ExecEnv) {
 }
 
 #[allow(clippy::explicit_write)]
-pub fn pwd_command(_: Vec<String>, _: &mut ExecEnv) {
+pub fn pwd_command(_: Vec<String>, _: RefMut<ExecEnv>) {
     if let Ok(path) = std::env::current_dir() {
         writeln!(io::stdout(), "{}", path.display()).unwrap();
     }
 }
 
 #[allow(clippy::explicit_write)]
-pub fn cd_command(args: Vec<String>, _: &mut ExecEnv) {
+pub fn cd_command(args: Vec<String>, _: RefMut<ExecEnv>) {
     fn navigate(path: &Path) {
         if std::env::set_current_dir(path).is_err() {
             writeln!(

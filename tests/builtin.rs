@@ -1,11 +1,13 @@
 use std::{
+    cell::RefCell,
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
+    rc::Rc,
 };
 
 use mysh::{env::ExecEnv, get_input_and_run};
 
-use crate::common::{TempFile};
+use crate::common::TempFile;
 
 mod common;
 
@@ -39,7 +41,7 @@ fn get_print_with_handler_u8(file: &mut File) -> Vec<u8> {
 
 macro_rules! execute {
     ($path:expr, $env:expr, $str:literal) => {
-        get_input_and_run(&format!($str, $path.display()), &mut $env);
+        get_input_and_run(&format!($str, $path.display()), $env.clone());
     };
 }
 
@@ -48,9 +50,9 @@ fn cd_absolute() {
     let _lock = io::stdout().lock();
     let mut temp_file = TempFile::build("mysh-tests-cd_absolute").unwrap();
     let path = temp_file.path();
-    let mut env = ExecEnv::new();
+    let env = Rc::new(RefCell::new(ExecEnv::new()));
 
-    get_input_and_run("cd /", &mut env);
+    get_input_and_run("cd /", env.clone());
     execute!(path, env, "pwd > {}");
 
     let output_path = get_print_with_handler_u8(temp_file.file());
@@ -65,30 +67,29 @@ fn echo() {
     let mut temp_file = TempFile::build("mysh-tests-echo").unwrap();
     temp_file.as_file_mut().lock().unwrap();
     let path = temp_file.path().to_path_buf();
-    let mut env = ExecEnv::new();
+    let env = Rc::new(RefCell::new(ExecEnv::new()));
 
-    execute!(path, env, "echo a1b2c3d   4e5f6g >> {}");             // a1b2c3d 4e5f6g
-    execute!(path, env, "echo \"abc  def \"  >> {}");               // abc  def 
-    execute!(path, env, "echo 'hello    world' >> {}");             // hello    world
-    execute!(path, env, "echo hello''wo'rl'd >> {}");               // helloworld
-    execute!(path, env, "echo \"shell's test\" >> {}");             // shell's test
-    execute!(path, env, "echo \"quz  hello\"  \"bar\" >> {}");      // quz  hello bar
-    execute!(path, env, r"echo three\ \ \ spaces >> {}");           // three   spaces
-    execute!(path, env, r"echo before\     after >> {}");           // before  after
-    execute!(path, env, r"echo hello\\world >> {}");                // hello\world
-    execute!(path, env, r"echo \'hello\' >> {}");                   // 'hello'
-    execute!(path, env, r#"echo \'\"literal quotes\"\' >> {}"#);    // '"literal quotes"'
-    execute!(path, env, r"echo ignore\_backslash >> {}");           // ignore_backslash
-    execute!(path, env, r#"echo 'example\"test' >> {}"#);           // example\"test
-    execute!(path, env, r"echo 'multiple\\slashes' >> {}");         // multiple\\slashes
-    execute!(path, env, r#"echo "\\ \" \' \_" >> {}"#);             // \ " \' \_
-    execute!(path, env, r#"e''ch"o" hello  world   >>  {}"#);       // hello world
+    execute!(path, env, "echo a1b2c3d   4e5f6g >> {}"); // a1b2c3d 4e5f6g
+    execute!(path, env, "echo \"abc  def \"  >> {}"); // abc  def 
+    execute!(path, env, "echo 'hello    world' >> {}"); // hello    world
+    execute!(path, env, "echo hello''wo'rl'd >> {}"); // helloworld
+    execute!(path, env, "echo \"shell's test\" >> {}"); // shell's test
+    execute!(path, env, "echo \"quz  hello\"  \"bar\" >> {}"); // quz  hello bar
+    execute!(path, env, r"echo three\ \ \ spaces >> {}"); // three   spaces
+    execute!(path, env, r"echo before\     after >> {}"); // before  after
+    execute!(path, env, r"echo hello\\world >> {}"); // hello\world
+    execute!(path, env, r"echo \'hello\' >> {}"); // 'hello'
+    execute!(path, env, r#"echo \'\"literal quotes\"\' >> {}"#); // '"literal quotes"'
+    execute!(path, env, r"echo ignore\_backslash >> {}"); // ignore_backslash
+    execute!(path, env, r#"echo 'example\"test' >> {}"#); // example\"test
+    execute!(path, env, r"echo 'multiple\\slashes' >> {}"); // multiple\\slashes
+    execute!(path, env, r#"echo "\\ \" \' \_" >> {}"#); // \ " \' \_
+    execute!(path, env, r#"e''ch"o" hello  world   >>  {}"#); // hello world
 
     temp_file.as_file_mut().flush().unwrap();
 
     let output = get_print_with_handler(temp_file.file());
-    let result =
-r#"a1b2c3d 4e5f6g
+    let result = r#"a1b2c3d 4e5f6g
 abc  def 
 hello    world
 helloworld
