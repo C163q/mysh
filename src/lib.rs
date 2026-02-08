@@ -1,15 +1,21 @@
 pub mod builtin;
 pub mod completion;
 pub mod env;
+pub mod execution;
 pub mod parse;
 pub mod redirect;
 pub mod result;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    fs::DirBuilder,
+    path::PathBuf,
+    rc::Rc,
+};
 
 use crate::{
-    env::{ExecEnv, PathEnv},
-    result::ExecResult,
+    env::{ExecContext, ExecEnv, PathEnv},
+    result::CommandResult,
 };
 
 pub fn get_path_env() -> PathEnv {
@@ -22,14 +28,33 @@ pub fn get_path_env() -> PathEnv {
     }
 }
 
-pub fn get_input_and_run(input: &str, env: Rc<RefCell<ExecEnv>>) -> ExecResult {
-    let parse_data = match parse::parse_command(input) {
-        Some(data) => data,
-        None => return ExecResult::Normal,
-    };
+pub fn get_histfile_env() -> Option<PathBuf> {
+    std::env::var_os("HISTFILE").map(PathBuf::from)
+}
 
-    match parse_data.first_arg {
-        None => ExecResult::Normal,
-        Some(cmd) => parse::execute_command(cmd, parse_data.arguments, env, parse_data.redirect),
+pub fn get_histfile_path(env: Ref<ExecEnv>) -> PathBuf {
+    let opt_histfile_path = env.histfile_env.clone();
+
+    match opt_histfile_path {
+        Some(path) => path,
+        None => {
+            let path = env.base_dirs.data_local_dir();
+            if !path.exists() {
+                DirBuilder::new().recursive(true).create(path).unwrap(); // TODO: handle error
+            }
+            env.base_dirs
+                .data_local_dir()
+                .to_owned()
+                .join("mysh_history")
+        }
     }
+}
+
+pub fn get_input_and_run(
+    input: &str,
+    env: Rc<RefCell<ExecEnv>>,
+    history: ExecContext,
+) -> CommandResult {
+    let exec = parse::parse_command(input);
+    execution::execute_command_chain(exec, env, history)
 }

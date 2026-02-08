@@ -4,7 +4,11 @@ use std::{
     rc::Rc,
 };
 
-use mysh::{completion::ShellCompleter, env::ExecEnv, result::ExecResult};
+use mysh::{
+    completion::ShellCompleter,
+    env::{ExecContext, ExecEnv},
+    result::CommandResult,
+};
 use rustyline::{CompletionType, Editor, error::ReadlineError};
 
 fn main() -> anyhow::Result<()> {
@@ -14,17 +18,33 @@ fn main() -> anyhow::Result<()> {
             .completion_type(CompletionType::List)
             .build(),
     )?;
+
     let path_env = mysh::get_path_env();
-    let env = Rc::new(RefCell::new(ExecEnv::build(path_env)));
+    let histfile_env = mysh::get_histfile_env();
+    let base_dirs = directories::BaseDirs::new().expect("Failed to get base directories");
+    let env = Rc::new(RefCell::new(ExecEnv::build(
+        path_env,
+        histfile_env,
+        base_dirs,
+    )));
+
     let completer = ShellCompleter::new(Rc::clone(&env));
     rl.set_helper(Some(completer));
+
+    {
+        let histfile_path = mysh::get_histfile_path(env.borrow());
+        if rl.load_history(&histfile_path).is_err() {
+            rl.save_history(&histfile_path)?;
+        }
+    }
+
     loop {
         let readline = rl.readline("$ ");
         let ret = match readline {
             Ok(line) => {
-                // TODO: History management
-                // rl.add_history_entry(line.as_str())?;
-                let ret = mysh::get_input_and_run(&line, Rc::clone(&env));
+                rl.add_history_entry(line.as_str())?;
+                let context = ExecContext::new(rl.history_mut());
+                let ret = mysh::get_input_and_run(&line, Rc::clone(&env), context);
                 io::stdout().flush()?;
                 ret
             }
@@ -33,22 +53,28 @@ fn main() -> anyhow::Result<()> {
                 // We follow their behavior here.
 
                 // TODO: Return code is not implemented yet.
-                ExecResult::Normal
+                CommandResult::Normal
             }
             Err(ReadlineError::Eof) => {
                 // When Ctrl-D is pressed, bash and zsh just exit the shell.
                 // While bash prints "exit" before exiting, zsh does not.
                 // We follow zsh's behavior here.
-                ExecResult::Exit
+                CommandResult::Exit
             }
             Err(e) => {
                 return Err(anyhow::anyhow!(e));
             }
         };
 
-        if ret == ExecResult::Exit {
+        if ret == CommandResult::Exit {
             break;
         }
     }
+
+    {
+        let histfile_path = mysh::get_histfile_path(env.borrow());
+        rl.save_history(&histfile_path)?;
+    }
+
     Ok(())
 }

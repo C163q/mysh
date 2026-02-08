@@ -1,46 +1,9 @@
-use std::{cell::RefCell, path::PathBuf, process, rc::Rc};
+use std::{collections::VecDeque, path::PathBuf};
 
 use crate::{
-    env::ExecEnv,
-    redirect::{
-        InputRedirect, OutputRedirect, Redirect, RedirectHandler, RedirectParseFragment,
-        RedirectParseInfo,
-    },
-    result::ExecResult,
+    execution::{Execution, ExecutionDescriptor},
+    redirect::{InputRedirect, OutputRedirect, Redirect, RedirectParseFragment, RedirectParseInfo},
 };
-
-pub fn execute_command(
-    cmd: String,
-    args: Vec<String>,
-    env: Rc<RefCell<ExecEnv>>,
-    redirect: Redirect,
-) -> ExecResult {
-    if cmd == "exit" {
-        return ExecResult::Exit;
-    }
-
-    let f = crate::builtin::BUILTIN_COMMANDS.with(|map| map.get(cmd.as_str()).copied());
-
-    if let Some(func) = f {
-        // RedirectHandler scope
-        let _handler = RedirectHandler::new(&redirect);
-        func(args, env.borrow_mut());
-        return ExecResult::Normal;
-    }
-
-    let mut command = process::Command::new(&cmd);
-    {
-        // RedirectHandler scope
-        let _handler = RedirectHandler::new(&redirect);
-        if let Ok(mut child) = command.args(args).spawn() {
-            let _ = child.wait(); // TODO: handle errors
-            return ExecResult::Normal;
-        }
-    } // RedirectHandler dropped here, restore fds
-
-    eprintln!("{}: command not found", &cmd);
-    ExecResult::Normal
-}
 
 pub(crate) struct ParseData {
     pub first_arg: Option<String>,
@@ -52,6 +15,59 @@ pub(crate) struct ParseData {
 pub enum ParseFragment {
     Argument(String),
     Redirect(RedirectParseFragment),
+    Pipe,
+}
+
+fn parse(mut fragments: VecDeque<ParseFragment>) -> VecDeque<ExecutionDescriptor> {
+    fn add_to_chain<F>(
+        exec_chain: &mut VecDeque<ExecutionDescriptor>,
+        data: ParseData,
+        constructor: F,
+    ) where
+        F: FnOnce(Execution) -> ExecutionDescriptor,
+    {
+        let exec = match Execution::from_parse_data(data) {
+            Some(exec) => exec,
+            None => return, // empty command, ignore
+        };
+        exec_chain.push_back(constructor(exec));
+    }
+
+    let mut exec_chain: VecDeque<ExecutionDescriptor> = VecDeque::new();
+
+    let mut partial_fragments = Vec::new();
+    while matches!(
+        fragments.front(),
+        Some(&ParseFragment::Argument(_) | &ParseFragment::Redirect(_))
+    ) {
+        partial_fragments.push(fragments.pop_front().unwrap());
+    }
+
+    add_to_chain(
+        &mut exec_chain,
+        parse_to_data(partial_fragments),
+        ExecutionDescriptor::Begin,
+    );
+
+    while let Some(ParseFragment::Pipe) = fragments.front() {
+        fragments.pop_front();
+
+        let mut partial_fragments = Vec::new();
+        while matches!(
+            fragments.front(),
+            Some(&ParseFragment::Argument(_) | &ParseFragment::Redirect(_))
+        ) {
+            partial_fragments.push(fragments.pop_front().unwrap());
+        }
+
+        add_to_chain(
+            &mut exec_chain,
+            parse_to_data(partial_fragments),
+            ExecutionDescriptor::Pipe,
+        );
+    }
+
+    exec_chain
 }
 
 // use `Result<ParseData, Error>` later
@@ -103,6 +119,10 @@ fn parse_to_data(fragments: Vec<ParseFragment>) -> ParseData {
                 // This is a syntax error in real shell, but we just ignore it here.
                 redirect_pending.replace(rfrag);
             }
+            ParseFragment::Pipe => {
+                // This should not happen.
+                panic!("Pipe should be handled in this function.");
+            }
         }
     }
 
@@ -114,8 +134,8 @@ fn parse_to_data(fragments: Vec<ParseFragment>) -> ParseData {
 }
 
 /// TODO: handle multi-line input
-pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
-    let mut fragments: Vec<ParseFragment> = Vec::new();
+pub(crate) fn parse_to_fragments(input: &str) -> VecDeque<ParseFragment> {
+    let mut fragments: VecDeque<ParseFragment> = VecDeque::new();
     // To build the current fragment
     let mut str_builder = String::new();
     // To handle single quotes
@@ -128,22 +148,22 @@ pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
     // To handle redirections
     let mut redirect_info: Option<RedirectParseInfo> = None;
 
-    fn update_args(fragments: &mut Vec<ParseFragment>, str_builder: &mut String) {
+    fn update_args(fragments: &mut VecDeque<ParseFragment>, str_builder: &mut String) {
         if str_builder.is_empty() {
             return;
         }
-        fragments.push(ParseFragment::Argument(str_builder.clone()));
+        fragments.push_back(ParseFragment::Argument(str_builder.clone()));
         str_builder.clear();
     }
 
     fn add_redirect(
-        fragments: &mut Vec<ParseFragment>,
+        fragments: &mut VecDeque<ParseFragment>,
         info: &RedirectParseInfo,
         str_builder: &mut String,
     ) {
         let frag = RedirectParseFragment::build(info, str_builder.clone());
         str_builder.clear();
-        fragments.push(ParseFragment::Redirect(frag));
+        fragments.push_back(ParseFragment::Redirect(frag));
     }
 
     for c in input.chars() {
@@ -250,7 +270,7 @@ pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
         }
 
         fn try_parse_redirect_fd(
-            fragments: &mut Vec<ParseFragment>,
+            fragments: &mut VecDeque<ParseFragment>,
             str_builder: &mut String,
             redirect_info: &mut RedirectParseInfo,
         ) {
@@ -286,6 +306,12 @@ pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
                 redirect_info = Some(info);
                 str_builder.push(c); // for RedirectParseFragment.value
             }
+            '|' => {
+                // TODO: || should be operator OR in shell, but we don't support it now,
+                // so we just treat it as two separate pipes.
+                update_args(&mut fragments, &mut str_builder);
+                fragments.push_back(ParseFragment::Pipe);
+            }
             _ if c.is_whitespace() => {
                 update_args(&mut fragments, &mut str_builder);
             }
@@ -303,7 +329,7 @@ pub(crate) fn parse_to_fragments(input: &str) -> Vec<ParseFragment> {
     fragments
 }
 
-pub(crate) fn parse_command(input: &str) -> Option<ParseData> {
+pub(crate) fn parse_command(input: &str) -> VecDeque<ExecutionDescriptor> {
     let fragments = parse_to_fragments(input);
-    Some(parse_to_data(fragments))
+    parse(fragments)
 }

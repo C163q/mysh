@@ -8,6 +8,7 @@ is_executable = "1.0.5"
 libc = "0.2.180"
 rustyline = { version = "17.0.2", features = ["derive"] }
 anyhow = "1.0.100"
+directories = "6.0.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"
