@@ -48,22 +48,42 @@ pub fn execute_command_chain(
     env: Rc<RefCell<ExecEnv>>,
     mut context: ExecContext,
 ) -> CommandResult {
+    /// pools of child processes to wait for
+    struct ExecChainGuard {
+        processes: VecDeque<Child>,
+    }
+
+    impl ExecChainGuard {
+        fn new() -> Self {
+            Self {
+                processes: VecDeque::new(),
+            }
+        }
+    }
+
+    impl Drop for ExecChainGuard {
+        fn drop(&mut self) {
+            for mut child in self.processes.drain(..) {
+                let _ = child.wait(); // TODO: handle error
+            }
+        }
+    }
+
+    let mut pool = ExecChainGuard::new();
+
     let mut first = match exec_chain.pop_front() {
         Some(ExecutionDescriptor::Begin(exec)) => exec,
         _ => return CommandResult::Normal, // empty or invalid
     };
 
-    let mut last_child: Option<Child> = None;
     let mut pipe_in = None;
     while let Some(ExecutionDescriptor::Pipe(exec)) = exec_chain.pop_front() {
         let (reader, writer) = io::pipe().unwrap(); // TODO: handle error
         let ret = execute_command(first, pipe_in, Some(writer), Rc::clone(&env), &mut context);
+
         first = exec;
-        if let Some(mut child) = last_child.take() {
-            let _ = child.wait(); // TODO: handle error
-        }
         match ret {
-            ExecResult::Running(child) => last_child = Some(child),
+            ExecResult::Running(child) => pool.processes.push_back(child),
             ExecResult::Exit => return CommandResult::Exit,
             ExecResult::Error(msg) => {
                 eprintln!("{}", msg);
@@ -75,12 +95,9 @@ pub fn execute_command_chain(
     }
 
     let ret = execute_command(first, pipe_in, None, env, &mut context);
-    if let Some(mut child) = last_child {
-        let _ = child.wait(); // TODO: handle error
-    }
     match ret {
-        ExecResult::Running(mut child) => {
-            let _ = child.wait(); // TODO: handle error
+        ExecResult::Running(child) => {
+            pool.processes.push_back(child);
             CommandResult::Normal
         }
         ExecResult::Exit => CommandResult::Exit,
