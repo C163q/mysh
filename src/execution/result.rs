@@ -2,7 +2,7 @@ use std::process::Child;
 
 // TODO: improve
 #[derive(Debug)]
-pub enum ExecResult {
+pub enum ExecutionResult {
     Exit,
     Normal,
     Running(Child),

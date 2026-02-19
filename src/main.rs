@@ -7,7 +7,7 @@ use std::{
 use mysh::{
     completion::ShellCompleter,
     env::{ExecContext, ExecEnv},
-    result::CommandResult,
+    execution::result::CommandResult,
 };
 use rustyline::{CompletionType, Editor, error::ReadlineError};
 

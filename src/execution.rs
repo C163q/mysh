@@ -1,50 +1,26 @@
+pub mod data;
+pub mod process;
+pub mod result;
+
 use std::{
     cell::RefCell,
     collections::VecDeque,
     io::{self, PipeReader, PipeWriter},
-    process::{self, Child},
+    process::Child,
     rc::Rc,
 };
 
 use crate::{
     env::{ExecContext, ExecEnv},
-    parse::ParseData,
-    redirect::{Redirect, RedirectHandler},
-    result::{CommandResult, ExecResult},
+    execution::{
+        data::{CommandDescriptor, RawCommand},
+        result::{CommandResult, ExecutionResult},
+    },
+    redirect::RedirectHandler,
 };
 
-#[derive(Debug)]
-pub struct Execution {
-    pub cmd: String,
-    pub arguments: Vec<String>,
-    pub redirect: Redirect,
-}
-
-impl Execution {
-    pub fn new(cmd: String, arguments: Vec<String>, redirect: Redirect) -> Self {
-        Self {
-            cmd,
-            arguments,
-            redirect,
-        }
-    }
-
-    pub(crate) fn from_parse_data(data: ParseData) -> Option<Self> {
-        match data.first_arg {
-            Some(cmd) => Some(Self::new(cmd, data.arguments, data.redirect)),
-            None => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ExecutionDescriptor {
-    Begin(Execution),
-    Pipe(Execution),
-}
-
 pub fn execute_command_chain(
-    mut exec_chain: VecDeque<ExecutionDescriptor>,
+    mut exec_chain: VecDeque<CommandDescriptor>,
     env: Rc<RefCell<ExecEnv>>,
     mut context: ExecContext,
 ) -> CommandResult {
@@ -72,85 +48,80 @@ pub fn execute_command_chain(
     let mut pool = ExecChainGuard::new();
 
     let mut first = match exec_chain.pop_front() {
-        Some(ExecutionDescriptor::Begin(exec)) => exec,
+        Some(CommandDescriptor::Begin(exec)) => exec,
         _ => return CommandResult::Normal, // empty or invalid
     };
 
     let mut pipe_in = None;
-    while let Some(ExecutionDescriptor::Pipe(exec)) = exec_chain.pop_front() {
+    while let Some(CommandDescriptor::Pipe(exec)) = exec_chain.pop_front() {
         let (reader, writer) = io::pipe().unwrap(); // TODO: handle error
         let ret = execute_command(first, pipe_in, Some(writer), Rc::clone(&env), &mut context);
 
         first = exec;
         match ret {
-            ExecResult::Running(child) => pool.processes.push_back(child),
-            ExecResult::Exit => return CommandResult::Exit,
-            ExecResult::Error(msg) => {
+            ExecutionResult::Running(child) => pool.processes.push_back(child),
+            ExecutionResult::Exit => return CommandResult::Exit,
+            ExecutionResult::Error(msg) => {
                 eprintln!("{}", msg);
                 return CommandResult::Normal;
             }
-            ExecResult::Normal => { /* continue */ }
+            ExecutionResult::Normal => { /* continue */ }
         }
         pipe_in = Some(reader);
     }
 
     let ret = execute_command(first, pipe_in, None, env, &mut context);
     match ret {
-        ExecResult::Running(child) => {
+        ExecutionResult::Running(child) => {
             pool.processes.push_back(child);
             CommandResult::Normal
         }
-        ExecResult::Exit => CommandResult::Exit,
-        ExecResult::Error(msg) => {
+        ExecutionResult::Exit => CommandResult::Exit,
+        ExecutionResult::Error(msg) => {
             eprintln!("{}", msg);
             CommandResult::Normal
         }
-        ExecResult::Normal => CommandResult::Normal,
+        ExecutionResult::Normal => CommandResult::Normal,
     }
 }
 
 pub fn execute_command(
-    exec: Execution,
+    raw_cmd: RawCommand,
     pipe_in: Option<PipeReader>,
     pipe_out: Option<PipeWriter>,
     env: Rc<RefCell<ExecEnv>>,
     context: &mut ExecContext,
-) -> ExecResult {
-    if exec.cmd == "exit" {
-        return ExecResult::Exit;
+) -> ExecutionResult {
+    if raw_cmd.cmd == "exit" {
+        return ExecutionResult::Exit;
     }
 
-    let f = crate::builtin::BUILTIN_COMMANDS.with(|map| map.get(exec.cmd.as_str()).copied());
+    let f = crate::builtin::BUILTIN_COMMANDS.with(|map| map.get(raw_cmd.cmd.as_str()).copied());
     if let Some(func) = f {
         // RedirectHandler scope
-        let _handler = RedirectHandler::new(&exec.redirect);
+        let _handler = RedirectHandler::new(&raw_cmd.redirect);
         {
             let mut e = env.borrow_mut();
             e.pipe_in = pipe_in;
             e.pipe_out = pipe_out;
 
-            func(exec.arguments, e, context);
+            func(raw_cmd.arguments, e, context);
 
             let mut e = env.borrow_mut();
             e.reset_pipes();
         }
-        return ExecResult::Normal;
+        return ExecutionResult::Normal;
     }
 
-    let mut command = process::Command::new(&exec.cmd);
-    {
-        // RedirectHandler scope
-        let _handler = RedirectHandler::new(&exec.redirect);
-        if let Some(pipe_in) = pipe_in {
-            command.stdin(pipe_in);
-        }
-        if let Some(pipe_out) = pipe_out {
-            command.stdout(pipe_out);
-        }
-        if let Ok(child) = command.args(exec.arguments).spawn() {
-            return ExecResult::Running(child);
-        }
-    } // RedirectHandler dropped here, restore fds
-
-    ExecResult::Error(format!("{}: command not found", &exec.cmd))
+    let mut builder = process::ChildBuilder::new(raw_cmd);
+    if let Some(pipe_in) = pipe_in {
+        builder.stdin(pipe_in);
+    }
+    if let Some(pipe_out) = pipe_out {
+        builder.stdout(pipe_out);
+    }
+    builder
+        .build()
+        .map(ExecutionResult::Running)
+        .unwrap_or_else(|e| ExecutionResult::Error(e.to_string()))
 }

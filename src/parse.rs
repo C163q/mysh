@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, path::PathBuf};
 
 use crate::{
-    execution::{Execution, ExecutionDescriptor},
+    execution::data::{CommandDescriptor, RawCommand},
     redirect::{InputRedirect, OutputRedirect, Redirect, RedirectParseFragment, RedirectParseInfo},
 };
 
@@ -18,22 +18,22 @@ pub enum ParseFragment {
     Pipe,
 }
 
-fn parse(mut fragments: VecDeque<ParseFragment>) -> VecDeque<ExecutionDescriptor> {
+fn parse(mut fragments: VecDeque<ParseFragment>) -> VecDeque<CommandDescriptor> {
     fn add_to_chain<F>(
-        exec_chain: &mut VecDeque<ExecutionDescriptor>,
+        exec_chain: &mut VecDeque<CommandDescriptor>,
         data: ParseData,
         constructor: F,
     ) where
-        F: FnOnce(Execution) -> ExecutionDescriptor,
+        F: FnOnce(RawCommand) -> CommandDescriptor,
     {
-        let exec = match Execution::from_parse_data(data) {
+        let exec = match RawCommand::from_parse_data(data) {
             Some(exec) => exec,
             None => return, // empty command, ignore
         };
         exec_chain.push_back(constructor(exec));
     }
 
-    let mut exec_chain: VecDeque<ExecutionDescriptor> = VecDeque::new();
+    let mut exec_chain: VecDeque<CommandDescriptor> = VecDeque::new();
 
     let mut partial_fragments = Vec::new();
     while matches!(
@@ -46,7 +46,7 @@ fn parse(mut fragments: VecDeque<ParseFragment>) -> VecDeque<ExecutionDescriptor
     add_to_chain(
         &mut exec_chain,
         parse_to_data(partial_fragments),
-        ExecutionDescriptor::Begin,
+        CommandDescriptor::Begin,
     );
 
     while let Some(ParseFragment::Pipe) = fragments.front() {
@@ -63,7 +63,7 @@ fn parse(mut fragments: VecDeque<ParseFragment>) -> VecDeque<ExecutionDescriptor
         add_to_chain(
             &mut exec_chain,
             parse_to_data(partial_fragments),
-            ExecutionDescriptor::Pipe,
+            CommandDescriptor::Pipe,
         );
     }
 
@@ -121,7 +121,7 @@ fn parse_to_data(fragments: Vec<ParseFragment>) -> ParseData {
             }
             ParseFragment::Pipe => {
                 // This should not happen.
-                panic!("Pipe should be handled in this function.");
+                unreachable!("Pipe should be handled in this function.");
             }
         }
     }
@@ -329,7 +329,7 @@ pub(crate) fn parse_to_fragments(input: &str) -> VecDeque<ParseFragment> {
     fragments
 }
 
-pub(crate) fn parse_command(input: &str) -> VecDeque<ExecutionDescriptor> {
+pub(crate) fn parse_command(input: &str) -> VecDeque<CommandDescriptor> {
     let fragments = parse_to_fragments(input);
     parse(fragments)
 }

@@ -4,7 +4,6 @@ pub mod env;
 pub mod execution;
 pub mod parse;
 pub mod redirect;
-pub mod result;
 
 use std::{
     cell::{Ref, RefCell},
@@ -15,7 +14,7 @@ use std::{
 
 use crate::{
     env::{ExecContext, ExecEnv, PathEnv},
-    result::CommandResult,
+    execution::result::CommandResult,
 };
 
 pub fn get_path_env() -> PathEnv {
